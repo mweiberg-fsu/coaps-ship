@@ -9,6 +9,7 @@ import requests
 import shutil
 import time
 
+import numpy as np
 import pandas as pd
 
 from concurrent.futures import ThreadPoolExecutor, as_completed

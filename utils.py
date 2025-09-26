@@ -19,8 +19,8 @@ def setup_logger(name, log_file, level=logging.INFO):
 # Function to clear log file contents on startup
 def clear_log_file(log_file):
     try:
-        if os.path.exists(log_file):
-            os.remove(log_file)
+        if os.path.exists(log_file): # Check if log file exists
+            os.remove(log_file) # Remove the existing log file on run
             print(f"Cleared log file: {log_file}")
         else:
             print(f"No log file found at: {log_file}")
