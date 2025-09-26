@@ -3,6 +3,7 @@
 
 import csv
 import io
+import logging
 import os
 import requests
 import shutil
@@ -10,4 +11,5 @@ import time
 
 import pandas as pd
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.request import urlretrieve
