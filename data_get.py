@@ -4,7 +4,6 @@
 from imports import *
 from config import *
 from utils import *
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = setup_logger('data_get', f'{logs_dir}/data_get.log', level=logging.DEBUG)
 

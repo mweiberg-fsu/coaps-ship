@@ -6,10 +6,12 @@ Generate uncertainty values for calculated latent and sensible heat fluxes, stre
 
 ## Directory Overview
 - **run.py** - This is the parent file to run *data_get*, *data_prc*, and *data_plt* functions.
-- **config.py** - Contains config options for running the program (e.g., ships, years, processor cores, and directories)
-- **data_get.py** - Contains functions to download input files for each vessel (interated over by each year)
-- **data_prc.py** - Contains functions to calculate output variables for uncertainty
-- **data_plt.py** - Contains functions to plot one-to-one scatter plots to check/compare the differences between runs
+- **imports.py** - Stores necessary Python modules and libraries to run the program
+- **config.py** - Config options for running the program (e.g., ships, years, processor cores, and directories)
+- **constants.py** - Contains constants necessary to run calculations
+- **data_get.py** - Functions to download input files for each vessel (interated over by each year)
+- **data_prc.py** - Functions to calculate output variables for uncertainty
+- **data_plt.py** - Functions to plot one-to-one scatter plots to check/compare the differences between runs
 - **utils.py** - Contains generalized functions for creating directories, logging, and other multi-purpose utility
 - **MFT23.py** - Functions for flux calculation by Dr. Bourassa
 - **logs/data_get.log** - Log file for debugging and tracking functions and output in *data_get.py*

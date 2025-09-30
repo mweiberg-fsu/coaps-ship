@@ -2387,7 +2387,7 @@ def validate_parameter(parameter, min_value, max_value, message=None):
             if type(min_value) is float:
                 parameter = float(parameter.item())
         if not min_value <= parameter <= max_value:
-            print(type(parameter), min_value, parameter, max_value)
+            # print(type(parameter), min_value, parameter, max_value)
             if message is None:
                 message = f"{parameter} is not within the range [{min_value}, {max_value}]"
             if "%s" in message:
