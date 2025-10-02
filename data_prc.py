@@ -170,6 +170,7 @@ def process_data():
 
                     # Perform flux calculations if enough valid data points
                     if z >= 3:  # Require at least 3 valid points in window
+                        flux_start = time.time()
                         # Precompute Gaussian samples for all iterations
                         tspd_gauss = np.random.normal(Mean(truew_new), VarStd(truew_new)[1], n)
                         press_gauss = np.random.normal(Mean(press_new), VarStd(press_new)[1], n)
@@ -199,6 +200,10 @@ def process_data():
                                 if j == 0:  # If first try invalid, assume all will be, skip
                                     break
 
+                        flux_end = time.time()
+                        flux_total = flux_end - flux_start
+                        logger.debug(f'Time for flux calculations at index {k}: {flux_total}')
+                    
                     # Prepare row for output
                     if len(shf) > 0:
                         row = [
