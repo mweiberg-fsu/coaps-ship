@@ -1,9 +1,3 @@
-import numpy as np
-import pandas as pd
-import os
-import time
-import csv
-import logging
 from config import *
 from constants import *
 from utils import *
@@ -12,7 +6,7 @@ from multiprocessing import Pool
 
 logger = setup_logger('data_prc', f'{logs_dir}/data_prc.log', level=logging.INFO)
 
-# Checks that each element in the data array is within reasonable bounds
+# Step 1 : Checks that each element in the data array is within reasonable bounds, validate it
 def check_array(arr, min_val, max_val, replacement_val):
     modified_arr = np.where(arr < min_val, replacement_val, arr)
     modified_arr = np.where(modified_arr > max_val, replacement_val, modified_arr)
@@ -26,7 +20,7 @@ def is_valid_input(*args):
 input_csvs = directory_destination
 create_directory(output_csvs)
 
-# Function to process a single chunk (to be run in parallel)
+# Step 2. Function to process a single chunk (to be run in parallel)
 def process_chunk(args):
     chunk, chunk_idx, number_of_chunks, window_radius, headers = args
     logger.info(f'Processing chunk {chunk_idx+1}/{number_of_chunks} in process {os.getpid()}')
@@ -50,7 +44,7 @@ def process_chunk(args):
     pressure = check_array(pressure, 0, 120000, np.nan)
     truew = check_array(truew, 0, 100, np.nan)
 
-    # Compute rolling means and stds
+    # Step 3: Compute rolling means and stds
     rolling_window = 2 * window_radius + 1
     min_periods = 3
 
@@ -74,7 +68,7 @@ def process_chunk(args):
     truew_mean = truew_series.rolling(rolling_window, center=True, min_periods=min_periods).mean().to_numpy()
     truew_std = truew_series.rolling(rolling_window, center=True, min_periods=min_periods).std(ddof=0).to_numpy()
 
-    # Process each data point in the chunk
+    # Step 4: Process each data point in the chunk
     row_buffer = []
     for k in range(window_radius, len(truew) - window_radius):
         lhf, shf, m_o, tau = [], [], [], []
@@ -82,6 +76,7 @@ def process_chunk(args):
         mean_tspd = truew_mean[k]
         std_tspd = truew_std[k]
 
+        # Skip if mean_tspd is NaN or std_tspd is negative
         if np.isnan(mean_tspd) or std_tspd < 0:
             row = [
                 time_list[k], ship_id[k], latitude[k], longitude[k],
@@ -89,14 +84,14 @@ def process_chunk(args):
                 -9999, -9999, -9999,
                 -9999, -9999, -9999, -9999, -9999
             ]
-        else:
+        else: # Only compute fluxes if mean_tspd is valid
             tspd_gauss = np.random.normal(mean_tspd, std_tspd, n)
             press_gauss = np.random.normal(press_mean[k], press_std[k], n)
             hum_gauss = np.random.normal(hum_mean[k], hum_std[k], n)
             airT_gauss = np.random.normal(airT_mean[k], airT_std[k], n)
             waterT_gauss = np.random.normal(waterT_mean[k], waterT_std[k], n)
 
-            for j in range(n):
+            for j in range(n): # Loop over n Gaussian samples
                 if is_valid_input(tspd_gauss[j], press_gauss[j], hum_gauss[j], airT_gauss[j], waterT_gauss[j]):
                     try:
                         flux = mft_fluxes(
@@ -118,6 +113,7 @@ def process_chunk(args):
                     if j == 0:
                         break
 
+        # Prepare output row    
         if len(shf) > 0:
             row = [
                 time_list[k], ship_id[k], latitude[k], longitude[k],
@@ -142,16 +138,24 @@ def process_chunk(args):
     logger.info(f'Time to complete chunk {chunk_idx+1}: {chunk_total}')
     return row_buffer
 
-# Main function to process data and calculate fluxes
+# Step 5: Main function to process data and calculate fluxes
 def process_data():
     logger.info("Starting the data processing and flux calculation")
     
     start_time = time.time()
     file_count = 0
 
+    # Ensure the base output directory exists
+    create_directory(output_csvs)
+
     for ship in ships:
         ship_start = time.time()
+        # Input directory for the ship
         directory_path = f'{input_csvs}/{ship}'
+        # Output directory for the ship
+        ship_output_dir = f'{output_csvs}/{ship}'
+        # Create ship-specific output directory
+        create_directory(ship_output_dir)
        
         for filename in os.listdir(directory_path):
             file_count += 1
@@ -177,7 +181,11 @@ def process_data():
             number_of_chunks = max(1, (len(data) // effective_chunk_size) + (1 if len(data) % effective_chunk_size > 0 else 0))
             logger.info(f"Processing file {file_path} with {number_of_chunks} chunks")
 
-            csv_filename = f'{output_csvs}/{filename[:-4]}_processed.csv'
+            # Construct output filename: SHIP_ID[year]_processed.csv
+            output_filename = f"{filename[:-4]}_processed.csv"  # Append _processed before .csv
+            csv_filename = os.path.join(ship_output_dir, output_filename)
+
+            # Write header to CSV
             with open(csv_filename, "w", newline="") as file:
                 writer = csv.writer(file)
                 writer.writerow(headers)
