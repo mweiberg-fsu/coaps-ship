@@ -18,6 +18,10 @@ Generate uncertainty values for calculated latent and sensible heat fluxes, stre
 1. For each available CSV file, up to 1000 lines of data will be allocated to a singular chunk
 1. Calculations for chunks are done in parallel, where one chunk is allocated a processor core
 
+### Generate Output CSV Files
+1. After all lines of data have been processed, processed uncertainty calculations will be saved in a csv file
+1. Files are stored in `data/output/SHIP_ID/*_processed.csv` (see directory overview for more information)
+
 ## Config Options
 1. The number of processor cores allocated can be set by `proc_num` for parallel processing
 1. Ship list can be set for array of vessels
@@ -37,7 +41,8 @@ Generate uncertainty values for calculated latent and sensible heat fluxes, stre
 ## Directory Overview
 - **logs/data_get.log** - Log file for debugging and tracking functions and output in *data_get.py*
 - **logs/data_prc.log** - Log file for debugging and tracking functions and output in *data_prc.py*
-- **data/input/SHIP_ID/*.csv** - Contains individual folders for each vessel with csv files for each active year ship was in service
+- **data/input/SHIP_ID/*.csv** - Contains individual folders for each vessel with `input` csv files for each active year ship was in service
+- **data/output/SHIP_ID/*.csv** - Contains individual folders for each vessel with `output` csv files for each active year ship was in service
 
 ## Workflow
 1. Program is executed by 'python run.py'.
