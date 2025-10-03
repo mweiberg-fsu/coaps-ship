@@ -139,7 +139,7 @@ def process_chunk(args):
     return row_buffer
 
 # Step 5: Main function to process data and calculate fluxes
-def process_data():
+def process_data_prl():
     logger.info("Starting the data processing and flux calculation")
     
     start_time = time.time()

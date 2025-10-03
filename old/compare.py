@@ -2,27 +2,23 @@ import csv
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import time
+from scipy.stats import pearsonr
 
-
-def percent_difference(a,b):
-    return((b-a) / ((a+b) / 2)) * 100
-    
+def percent_difference(a, b):
+    return ((b - a) / ((a + b) / 2)) * 100
 
 ######################################################################################################################################################################################
 
 # Input csv file for one run of uncertainty calculations
-file_run1 = '.csv'
+file_run1 = '../data/output/KAOU2025_processed_nonparallel.csv'
 
 # Input csv file for a second run of uncertainty calculations
-file_run2 = '.csv'
+file_run2 = '../data/output/KAOU2025_processed_parallel.csv'
 
-#Insert number of permutations done on the uncertainty calculations
+# Insert number of permutations done on the uncertainty calculations
 n = 100
 
-
 ######################################################################################################################################################################################
-
 
 dataRun1 = pd.read_csv(file_run1)
 dataRun2 = pd.read_csv(file_run2)
@@ -43,7 +39,6 @@ TSstdv1 = dataRun1['TS stdv'].to_numpy()
 Pstdv1 = dataRun1['P stdv'].to_numpy()
 RHstdv1 = dataRun1['RH stdv'].to_numpy()
 SPDstdv1 = dataRun1['SPD stdv'].to_numpy()
-
 
 time2 = dataRun2['time'].to_numpy() 
 call2 = dataRun2['platform_call_sign'].to_numpy()
@@ -113,106 +108,61 @@ for i in range(len(row2)):
     SPDa.append(row1[i][15])
     SPDb.append(row2[i][15])
 
+# Debug: Check range of shfSa to verify threshold
+print(f"SHF Standard Deviation (Run 1) - Min: {min(shfSa):.2f}, Max: {max(shfSa):.2f}, Mean: {np.mean(shfSa):.2f}")
+
 extreme_speed = []
 extreme_speedT = []
 extreme_speed_time = []
-for i in range(len(SPDa)):
+extreme_indices = []  # To store indices for cross-referencing
+for i in range(len(shfSa)):
     if shfSa[i] > 15:
         extreme_speed.append(shfSa[i])
-        # # print(row1[i][0][11:16])
         extreme_speedT.append(row1[i][0][11:16])
         extreme_speed_time.append(row1[i][0])
-        print(row1[i][0])
+        extreme_indices.append(i)
+        print(f"Extreme SHF Std Found at index {i}: {shfSa[i]:.2f} W/m², Time: {row1[i][0]}")
 
-
+# For checking outliers: Print cross-references with other variables for extreme cases
+print("\nExtreme SHF Std Dev Cases (Run 1 > 15):")
+if extreme_indices:
+    for idx in extreme_indices:
+        print(f"Time: {row1[idx][0]}")
+        print(f"SHF Std (Run 1): {shfSa[idx]:.2f} W/m², Wind Speed Std (Run 1): {SPDa[idx]:.2f} m/s, Temp Std (Run 1): {Ta[idx]:.2f} °C")
+        print(f"SHF Std (Run 2): {shfSb[idx]:.2f} W/m², Wind Speed Std (Run 2): {SPDb[idx]:.2f} m/s, Temp Std (Run 2): {Tb[idx]:.2f} °C")
+        print("---")
+else:
+    print("No SHF Standard Deviation values > 15 found in Run 1.")
 
 #####################################################################################
 ########################## Create One-to-One Scatter Plots ##########################
 #####################################################################################
 
-plt.figure()
-plt.scatter(shfSa, shfSb)
-plt.xlabel('Run 1')
-plt.ylabel('Run 2')
-plt.title(f'SHF Standard Deviation n={n}')
-plt.savefig(f'shfStdv{n}.png')
+def create_scatter_plot(x, y, xlabel, ylabel, title, filename):
+    plt.figure()
+    plt.scatter(x, y, alpha=0.6)
+    min_val = min(min(x), min(y))
+    max_val = max(max(x), max(y))
+    plt.plot([min_val, max_val], [min_val, max_val], 'k--', label='y=x')  # Add diagonal line
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.title(title)
+    plt.legend()
+    plt.savefig(filename)
+    plt.close()
 
-plt.figure()
-plt.scatter(shfMa, shfMb)
-plt.xlabel('Run 1')
-plt.ylabel('Run 2')
-plt.title(f'SHF Mean n={n}')
-plt.savefig(f'shfMean{n}.png')
-
-plt.figure()
-plt.scatter(lhfSa, lhfSb)
-plt.xlabel('Run 1')
-plt.ylabel('Run 2')
-plt.title(f'LHF Standard Deviation n={n}')
-plt.savefig(f'lhfStdv{n}.png')
-
-plt.figure()
-plt.scatter(lhfMa, lhfMb)
-plt.xlabel('Run 1')
-plt.ylabel('Run 2')
-plt.title(f'LHF Mean n={n}')
-plt.savefig(f'lhfMean{n}.png')
-
-plt.figure()
-plt.scatter(tauSa, tauSb)
-plt.xlabel('Run 1')
-plt.ylabel('Run 2')
-plt.title(f'tau Standard Deviation n={n}')
-plt.savefig(f'tauStdev{n}.png')
-
-plt.figure()
-plt.scatter(tauMa, tauMb)
-plt.xlabel('Run 1')
-plt.ylabel('Run 2')
-plt.title('tau Mean n=150')
-plt.savefig('tauMean150.png')
-
-plt.figure()
-plt.scatter(da, db)
-plt.xlabel('Run 1')
-plt.ylabel('Run 2')
-plt.title(f'Mean dmo n={n}')
-plt.savefig(f'dmoMean{n}.png')
-
-plt.figure()
-plt.scatter(Ta, Tb)
-plt.xlabel('Run 1')
-plt.ylabel('Run 2')
-plt.title(f'T Standard Deviation n={n}')
-plt.savefig(f'Tstdv{n}.png')
-
-plt.figure()
-plt.scatter(TSa, TSb)
-plt.xlabel('Run 1')
-plt.ylabel('Run 2')
-plt.title(f'TS Standard Deviation n={n}')
-plt.savefig(f'TSstdev{n}.png')
-
-plt.figure()
-plt.scatter(Pa, Pb)
-plt.xlabel('Run 1')
-plt.ylabel('Run 2')
-plt.title(f'P Standard Deviation n={n}')
-plt.savefig(f'Pstdv{n}.png')
-
-plt.figure()
-plt.scatter(RHa, RHb)
-plt.xlabel('Run 1')
-plt.ylabel('Run 2')
-plt.title(f'RH Standard Deviation n={n}')
-plt.savefig(f'RHstdv{n}.png')
-
-plt.figure()
-plt.scatter(SPDa, SPDb)
-plt.xlabel('Run 1')
-plt.ylabel('Run 2')
-plt.title(f'SPD Standard Deviation n={n}')
-plt.savefig(f'SPDstdv{n}.png')
+create_scatter_plot(shfSa, shfSb, 'Run 1 (W/m²)', 'Run 2 (W/m²)', f'SHF Standard Deviation n={n}', f'shfStdv{n}.png')
+create_scatter_plot(shfMa, shfMb, 'Run 1 (W/m²)', 'Run 2 (W/m²)', f'SHF Mean n={n}', f'shfMean{n}.png')
+create_scatter_plot(lhfSa, lhfSb, 'Run 1 (W/m²)', 'Run 2 (W/m²)', f'LHF Standard Deviation n={n}', f'lhfStdv{n}.png')
+create_scatter_plot(lhfMa, lhfMb, 'Run 1 (W/m²)', 'Run 2 (W/m²)', f'LHF Mean n={n}', f'lhfMean{n}.png')
+create_scatter_plot(tauSa, tauSb, 'Run 1 (N/m²)', 'Run 2 (N/m²)', f'Tau Standard Deviation n={n}', f'tauStdev{n}.png')
+create_scatter_plot(tauMa, tauMb, 'Run 1 (N/m²)', 'Run 2 (N/m²)', f'Tau Mean n={n}', f'tauMean{n}.png')
+create_scatter_plot(da, db, 'Run 1', 'Run 2', f'Mean DMO n={n}', f'dmoMean{n}.png')
+create_scatter_plot(Ta, Tb, 'Run 1 (°C)', 'Run 2 (°C)', f'Temperature Standard Deviation n={n}', f'Tstdv{n}.png')
+create_scatter_plot(TSa, TSb, 'Run 1 (°C)', 'Run 2 (°C)', f'Sea Surface Temperature Standard Deviation n={n}', f'TSstdv{n}.png')
+create_scatter_plot(Pa, Pb, 'Run 1 (hPa)', 'Run 2 (hPa)', f'Pressure Standard Deviation n={n}', f'Pstdv{n}.png')
+create_scatter_plot(RHa, RHb, 'Run 1 (%)', 'Run 2 (%)', f'Relative Humidity Standard Deviation n={n}', f'RHstdv{n}.png')
+create_scatter_plot(SPDa, SPDb, 'Run 1 (m/s)', 'Run 2 (m/s)', f'Wind Speed Standard Deviation n={n}', f'SPDstdv{n}.png')
 
 #####################################################################################
 ##################### Calculate Percent Difference Between Runs #####################
@@ -225,10 +175,51 @@ for i in range(len(row2)):
     lhfMean.append(percent_difference(row2[i][7], row1[i][7]))
     tauStdv.append(percent_difference(row2[i][8], row1[i][8]))
     tauMean.append(percent_difference(row2[i][9], row1[i][9]))
-    meanDMO.append(percent_difference(row2[i][10],row1[i][10]))
+    meanDMO.append(percent_difference(row2[i][10], row1[i][10]))
     Tstdv.append(percent_difference(row2[i][11], row1[i][11]))
     TSstdv.append(percent_difference(row2[i][12], row1[i][12]))
     Pstdv.append(percent_difference(row2[i][13], row1[i][13]))
     RHstdv.append(percent_difference(row2[i][14], row1[i][14]))
     SPDstdv.append(percent_difference(row2[i][15], row1[i][15]))
 
+# Plot histograms of percent differences
+def create_histogram(data, title, filename):
+    plt.figure()
+    plt.hist(data, bins=20, edgecolor='black')
+    plt.title(title)
+    plt.xlabel('Percent Difference (%)')
+    plt.ylabel('Frequency')
+    plt.savefig(filename)
+    plt.close()
+
+create_histogram(shfStdv, f'Percent Difference: SHF Standard Deviation n={n}', f'shfStdv_diff_hist{n}.png')
+create_histogram(shfMean, f'Percent Difference: SHF Mean n={n}', f'shfMean_diff_hist{n}.png')
+create_histogram(lhfStdv, f'Percent Difference: LHF Standard Deviation n={n}', f'lhfStdv_diff_hist{n}.png')
+create_histogram(lhfMean, f'Percent Difference: LHF Mean n={n}', f'lhfMean_diff_hist{n}.png')
+create_histogram(tauStdv, f'Percent Difference: Tau Standard Deviation n={n}', f'tauStdv_diff_hist{n}.png')
+create_histogram(tauMean, f'Percent Difference: Tau Mean n={n}', f'tauMean_diff_hist{n}.png')
+create_histogram(meanDMO, f'Percent Difference: Mean DMO n={n}', f'dmoMean_diff_hist{n}.png')
+create_histogram(Tstdv, f'Percent Difference: Temperature Standard Deviation n={n}', f'Tstdv_diff_hist{n}.png')
+create_histogram(TSstdv, f'Percent Difference: Sea Surface Temperature Standard Deviation n={n}', f'TSstdv_diff_hist{n}.png')
+create_histogram(Pstdv, f'Percent Difference: Pressure Standard Deviation n={n}', f'Pstdv_diff_hist{n}.png')
+create_histogram(RHstdv, f'Percent Difference: Relative Humidity Standard Deviation n={n}', f'RHstdv_diff_hist{n}.png')
+create_histogram(SPDstdv, f'Percent Difference: Wind Speed Standard Deviation n={n}', f'SPDstdv_diff_hist{n}.png')
+
+# Calculate and print Pearson correlation coefficients
+def print_correlation(x, y, var_name):
+    corr, p_value = pearsonr(x, y)
+    print(f"Pearson Correlation for {var_name}: {corr:.4f} (p-value: {p_value:.4f})")
+
+print("\nCorrelation Coefficients Between Runs:")
+print_correlation(shfSa, shfSb, "SHF Standard Deviation")
+print_correlation(shfMa, shfMb, "SHF Mean")
+print_correlation(lhfSa, lhfSb, "LHF Standard Deviation")
+print_correlation(lhfMa, lhfMb, "LHF Mean")
+print_correlation(tauSa, tauSb, "Tau Standard Deviation")
+print_correlation(tauMa, tauMb, "Tau Mean")
+print_correlation(da, db, "Mean DMO")
+print_correlation(Ta, Tb, "Temperature Standard Deviation")
+print_correlation(TSa, TSb, "Sea Surface Temperature Standard Deviation")
+print_correlation(Pa, Pb, "Pressure Standard Deviation")
+print_correlation(RHa, RHb, "Relative Humidity Standard Deviation")
+print_correlation(SPDa, SPDb, "Wind Speed Standard Deviation")

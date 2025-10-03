@@ -5,15 +5,7 @@ from imports import *
 from config import *
 from data_get import *
 from data_plt import *
-
-
-
-## File: run.py
-## Description: Main script to run data retrieval and processing
-
-from imports import *
-from config import *
-from data_get import *
+from data_prc import process_data_prl
 from data_prc_nonprl import process_data  # Import process_data from data_prc.py
 
 def main():
@@ -32,7 +24,7 @@ def main():
     
     # Step 3: Process downloaded data
     logger.info("Initiating data processing")
-    process_data()  # Process data for ships in config.ships
+    process_data_prl() # Process ship data for uncertainty calculations
     print("Data processing complete.")
 
     # Step 4: Plot data (next step)
