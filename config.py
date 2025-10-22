@@ -12,7 +12,7 @@
 ships = ["KAOU"]
 
 # Define years from 2005 to 2025
-years = [2025]
+years = [2011]
 
 # for i in range(2005, 2026):
 #     years.append(i)
@@ -24,6 +24,7 @@ directory_destination = 'data/input/'
 output_csvs = 'data/output/'
 variable_name = 'in_T'
 logs_dir = 'logs'
+imgs_dir = 'imgs'
 
 # Headers printed to output file
 headers = ['time', 'platform_call_sign', 'latitude', 'longitude', 'hfss stdv', 'hfss mean', 'hfls stdv', 'hfls mean', 

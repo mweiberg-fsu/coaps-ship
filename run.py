@@ -4,7 +4,7 @@
 from imports import *
 from config import *
 from data_get import *
-from data_plt import *
+# from data_plt import *
 from data_prc import process_data_prl
 from data_prc_nonprl import process_data  # Import process_data from data_prc.py
 
@@ -25,6 +25,7 @@ def main():
     # Step 3: Process downloaded data
     logger.info("Initiating data processing")
     process_data_prl() # Process ship data for uncertainty calculations
+        # process_data()
     print("Data processing complete.")
 
     # Step 4: Plot data (next step)
