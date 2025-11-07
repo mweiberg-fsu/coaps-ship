@@ -1,3 +1,10 @@
+# Filename: data_prc.py
+
+# Description: This script processes ship data to calculate latent and sensible heat fluxes
+#              using Dr. Bourassa's MFT calculations. It reads input CSV files, computes
+#              rolling statistics, performs flux calculations, and writes the results to output CSV files.
+
+
 import os
 import csv
 import time
@@ -15,9 +22,11 @@ from MFT23 import *
 logger = setup_logger('data_prc', f'{logs_dir}/data_prc.log', level=logging.INFO)
 
 # Constants for incremental writing
-BATCH_SIZE = 10000  # Number of rows to write at a time
+BATCH_SIZE = 10000  # Number of rows to write at a time for chunk size
 
+####################################################################################################################
 # Step 1: Checks that each element in the data array is within reasonable bounds, validate it
+####################################################################################################################
 def check_array(arr, min_val, max_val, replacement_val):
     modified_arr = np.where(arr < min_val, replacement_val, arr)
     modified_arr = np.where(modified_arr > max_val, replacement_val, modified_arr)
@@ -31,13 +40,15 @@ def is_valid_input(*args):
 input_csvs = directory_destination
 create_directory(output_csvs)
 
-# Step 2: Function to process a single chunk (to be run in parallel)
+####################################################################################################################
+## Step 2: Function to process a single chunk (to be run in parallel)
+####################################################################################################################
 def process_chunk(args):
     chunk, chunk_idx, number_of_chunks, window_radius, headers, output_filename = args
     # Define temporary file name with ship, filename, and chunk index
     temp_filename = f"{output_filename[:-4]}_chunk{chunk_idx}.csv"
     
-    # Check if temporary file already exists
+    # Check if temporary file already exists (in case of crashes/terminations)
     if os.path.exists(temp_filename):
         logger.info(f'Skipping chunk {chunk_idx+1}/{number_of_chunks} as {temp_filename} already exists')
         return temp_filename
@@ -62,41 +73,50 @@ def process_chunk(args):
     hum = check_array(hum, 0, 1, np.nan)
     pressure = check_array(pressure, 0, 120000, np.nan)
     truew = check_array(truew, 0, 100, np.nan)
-
-    # Step 3: Compute rolling means and stds
+    ####################################################################################################################
+    ## Step 3: Compute rolling means and stds
+    ####################################################################################################################
     rolling_window = 2 * window_radius + 1
     min_periods = 3
 
+    # Air temperature rolling stats
     airT_series = pd.Series(airTemp)
     airT_mean = airT_series.rolling(rolling_window, center=True, min_periods=min_periods).mean().to_numpy()
     airT_std = airT_series.rolling(rolling_window, center=True, min_periods=min_periods).std(ddof=0).to_numpy()
 
+    # Water temperature rolling stats
     waterT_series = pd.Series(waterTemp)
     waterT_mean = waterT_series.rolling(rolling_window, center=True, min_periods=min_periods).mean().to_numpy()
     waterT_std = waterT_series.rolling(rolling_window, center=True, min_periods=min_periods).std(ddof=0).to_numpy()
 
+    # Humidity rolling stats
     hum_series = pd.Series(hum)
     hum_mean = hum_series.rolling(rolling_window, center=True, min_periods=min_periods).mean().to_numpy()
     hum_std = hum_series.rolling(rolling_window, center=True, min_periods=min_periods).std(ddof=0).to_numpy()
 
+    # Pressure rolling stats
     press_series = pd.Series(pressure)
     press_mean = press_series.rolling(rolling_window, center=True, min_periods=min_periods).mean().to_numpy()
     press_std = press_series.rolling(rolling_window, center=True, min_periods=min_periods).std(ddof=0).to_numpy()
 
+    # True wind speed rolling stats
     truew_series = pd.Series(truew)
     truew_mean = truew_series.rolling(rolling_window, center=True, min_periods=min_periods).mean().to_numpy()
     truew_std = truew_series.rolling(rolling_window, center=True, min_periods=min_periods).std(ddof=0).to_numpy()
 
-    # Step 4: Process each data point in the chunk and write incrementally
+    ####################################################################################################################
+    ## Step 4: Process each data point in the chunk and write incrementally
+    ####################################################################################################################
     row_buffer = []
     with open(temp_filename, 'w', newline='') as temp_file:
         writer = csv.writer(temp_file)
 
+        # Loop over data points, skipping edges
         for k in range(window_radius, len(truew) - window_radius):
             lhf, shf, m_o, tau = [], [], [], []
 
-            mean_tspd = truew_mean[k]
-            std_tspd = truew_std[k]
+            mean_tspd = truew_mean[k] # Mean true wind speed
+            std_tspd = truew_std[k] # Std dev of true wind speed
 
             # Skip if mean_tspd is NaN or std_tspd is negative
             if np.isnan(mean_tspd) or std_tspd < 0:
@@ -124,10 +144,10 @@ def process_chunk(args):
                                 net_heat_flux, warn, flux_model, z0_mom_prm, z0_theta_q_prm, stable_prm,
                                 oil_fract_area, dimensionless_m_o_length, zo_m, missing
                             )
-                            m_o.append(flux[7])
-                            lhf.append(flux[2])
-                            shf.append(flux[1])
-                            tau.append(flux[3][0])
+                            m_o.append(flux[7]) # mean dmo
+                            lhf.append(flux[2]) # lhf
+                            shf.append(flux[1]) # shf
+                            tau.append(flux[3][0]) # tau
                         except Exception as e:
                             logger.error(f'Error in flux calculation at index {k}: {e}')
                     else:
@@ -170,12 +190,15 @@ def process_chunk(args):
             os.fsync(temp_file.fileno())
             logger.debug(f'Wrote {len(row_buffer)} remaining rows to temporary file {temp_filename} for chunk {chunk_idx+1}')
 
+    # Final timing for chunk
     chunk_end = time.time()
     chunk_total = chunk_end - chunk_start
     logger.info(f'Time to complete chunk {chunk_idx+1}: {chunk_total}')
     return temp_filename  # Return the path to the temporary file
 
-# Step 5: Main function to process data and calculate fluxes
+####################################################################################################################
+## Step 5: Main function to process data and calculate fluxes using Dr. Bourassa's MFT calculations
+####################################################################################################################
 def process_data_prl():
     logger.info("Starting the data processing and flux calculation")
     
@@ -194,11 +217,13 @@ def process_data_prl():
         # Create ship-specific output directory
         create_directory(ship_output_dir)
        
+        # Loop over all files in the ship's input directory
         for filename in os.listdir(directory_path):
             file_count += 1
             loop_start = time.time()
             file_path = os.path.join(directory_path, filename)
             
+            # Load data, skipping first two rows
             try:
                 data = pd.read_csv(file_path, skiprows=[1, 2])
                 logger.info(f"Loaded file {file_path} with {len(data)} rows")
@@ -206,6 +231,7 @@ def process_data_prl():
                 logger.error(f"Failed to read {file_path}: {e}")
                 continue
 
+            # Define chunk parameters
             overlap = window_size // 2
             if chunk_size <= 2 * overlap:
                 logger.error(f"Invalid chunk_size ({chunk_size}) or overlap ({overlap}) for file {file_path}.")
@@ -213,7 +239,8 @@ def process_data_prl():
             if chunk_size <= 0 or overlap < 0:
                 logger.error(f"Invalid chunk_size ({chunk_size}) or overlap ({overlap}) for file {file_path}.")
                 continue
-
+            
+            # Calculate number of chunks
             effective_chunk_size = chunk_size - 2 * overlap
             number_of_chunks = max(1, (len(data) // effective_chunk_size) + (1 if len(data) % effective_chunk_size > 0 else 0))
             logger.info(f"Processing file {file_path} with {number_of_chunks} chunks")
@@ -225,10 +252,10 @@ def process_data_prl():
             if os.path.exists(output_filename):
                 try:
                     output_data = pd.read_csv(output_filename)
-                    if len(output_data) >= len(data) - 2 * window_radius:
+                    if len(output_data) >= len(data) - 2 * window_radius: # Account for edge effects
                         logger.info(f"Skipping {output_filename} as it appears complete with {len(output_data)} rows")
                         continue
-                except Exception as e:
+                except Exception as e: # If reading fails, proceed to reprocess
                     logger.warning(f"Could not verify {output_filename}: {e}. Proceeding with processing.")
 
             # Write header to CSV
@@ -237,7 +264,7 @@ def process_data_prl():
                 writer.writerow(headers)
 
             # Define window_radius before chunk preparation
-            window_radius = 5  # Hardcoded as in original code; adjust if window_size changes
+            window_radius = 5  # Adjust window size as needed
 
             # Prepare chunks for parallel processing
             chunks = []
@@ -269,14 +296,17 @@ def process_data_prl():
                         if os.path.exists(temp_file_path):
                             os.unlink(temp_file_path)  # Delete temporary file after appending
 
+            # Final timing for file
             loop_end = time.time()
             loop_total = loop_end - loop_start
             logger.info(f'Time to complete file: {loop_total}')
 
+        # Final timing for ship
         ship_end = time.time()
         ship_total = ship_end - ship_start
         logger.info(f'Time to complete ship {ship}: {ship_total}')
     
+    # Final timing for all processing
     end_time = time.time()
     elapsed_time = end_time - start_time
     minutes, seconds = divmod(elapsed_time, 60)

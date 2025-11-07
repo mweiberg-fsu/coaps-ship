@@ -1,5 +1,5 @@
 ## File: run.py
-## Description: Main script to run data retrieval and processing
+## Description: Main script to run data retrieval and processing functions
 
 from imports import *
 from config import *
@@ -9,6 +9,7 @@ from data_prc import process_data_prl
 from data_prc_nonprl import process_data  # Import process_data from data_prc.py
 
 def main():
+
     # Step 1: Assign logging
     logger = setup_logger('run', f'{logs_dir}/run.log', level=logging.INFO)
     logger.info("Starting the data retrieval and processing pipeline")
@@ -28,9 +29,8 @@ def main():
         # process_data()
     print("Data processing complete.")
 
-    # Step 4: Plot data (next step)
+    # Step 4: Plot data
     ## plot_data()  # temp
-
 
     # Log total execution time
     end_time = time.time()

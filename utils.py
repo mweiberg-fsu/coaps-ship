@@ -1,4 +1,6 @@
-# utils.py
+# Filename: utils.py
+# Description: Utility functions for directory management, logging, and CSV variable checking.
+
 from imports import *
 
 ## Create directory if it doesn't exist
