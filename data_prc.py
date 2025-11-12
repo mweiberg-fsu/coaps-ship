@@ -1,19 +1,14 @@
-# Filename: data_prc.py
+## File: data_prc_nonprl.py
+## Description: Optimized data processing and flux calculations for ship data,
+##              including Monte Carlo uncertainty estimation.
+##              **Now respects config.years – only files for those years are processed.**
 
-# Description: This script processes ship data to calculate latent and sensible heat fluxes
-#              using Dr. Bourassa's MFT calculations. It reads input CSV files, computes
-#              rolling statistics, performs flux calculations, and writes the results to output CSV files.
-
-
-import os
-import csv
-import time
-import logging
 import numpy as np
 import pandas as pd
-from multiprocessing import Pool
-import tempfile
-import shutil
+import os
+import time
+import csv
+import logging
 from config import *
 from constants import *
 from utils import *
@@ -21,293 +16,213 @@ from MFT23 import *
 
 logger = setup_logger('data_prc', f'{logs_dir}/data_prc.log', level=logging.INFO)
 
-# Constants for incremental writing
-BATCH_SIZE = 10000  # Number of rows to write at a time for chunk size
-
-####################################################################################################################
-# Step 1: Checks that each element in the data array is within reasonable bounds, validate it
-####################################################################################################################
+# ----------------------------------------------------------------------
+# Helper functions (unchanged)
+# ----------------------------------------------------------------------
 def check_array(arr, min_val, max_val, replacement_val):
+    """Clamp values to a reasonable range."""
     modified_arr = np.where(arr < min_val, replacement_val, arr)
     modified_arr = np.where(modified_arr > max_val, replacement_val, modified_arr)
     return modified_arr
 
-# Validates that all inputs are not NaN
+
 def is_valid_input(*args):
+    """Return True if none of the arguments are NaN."""
     return all(not np.isnan(x) for x in args)
 
-# Set input and output directories
+
+# ----------------------------------------------------------------------
+# Directories
+# ----------------------------------------------------------------------
 input_csvs = directory_destination
 create_directory(output_csvs)
 
-####################################################################################################################
-## Step 2: Function to process a single chunk (to be run in parallel)
-####################################################################################################################
-def process_chunk(args):
-    chunk, chunk_idx, number_of_chunks, window_radius, headers, output_filename = args
-    # Define temporary file name with ship, filename, and chunk index
-    temp_filename = f"{output_filename[:-4]}_chunk{chunk_idx}.csv"
-    
-    # Check if temporary file already exists (in case of crashes/terminations)
-    if os.path.exists(temp_filename):
-        logger.info(f'Skipping chunk {chunk_idx+1}/{number_of_chunks} as {temp_filename} already exists')
-        return temp_filename
-
-    logger.info(f'Processing chunk {chunk_idx+1}/{number_of_chunks} in process {os.getpid()}')
-    chunk_start = time.time()
-    
-    # Extract variables from chunk
-    airTemp = chunk['in_T'].to_numpy().astype(float)
-    hum = chunk['in_RH'].to_numpy().astype(float) / 100
-    pressure = chunk['in_P'].to_numpy().astype(float) * 100
-    waterTemp = chunk['in_TS'].to_numpy().astype(float)
-    truew = chunk['in_SPD'].to_numpy().astype(float)
-    time_list = chunk['time'].to_numpy()
-    latitude = chunk['latitude'].to_numpy()
-    longitude = chunk['longitude'].to_numpy()
-    ship_id = chunk['platform_call_sign'].to_numpy()
-
-    # Validate and clean data arrays
-    airTemp = check_array(airTemp, -60, 100, np.nan)
-    waterTemp = check_array(waterTemp, -4, 100, np.nan)
-    hum = check_array(hum, 0, 1, np.nan)
-    pressure = check_array(pressure, 0, 120000, np.nan)
-    truew = check_array(truew, 0, 100, np.nan)
-    ####################################################################################################################
-    ## Step 3: Compute rolling means and stds
-    ####################################################################################################################
-    rolling_window = 2 * window_radius + 1
-    min_periods = 3
-
-    # Air temperature rolling stats
-    airT_series = pd.Series(airTemp)
-    airT_mean = airT_series.rolling(rolling_window, center=True, min_periods=min_periods).mean().to_numpy()
-    airT_std = airT_series.rolling(rolling_window, center=True, min_periods=min_periods).std(ddof=0).to_numpy()
-
-    # Water temperature rolling stats
-    waterT_series = pd.Series(waterTemp)
-    waterT_mean = waterT_series.rolling(rolling_window, center=True, min_periods=min_periods).mean().to_numpy()
-    waterT_std = waterT_series.rolling(rolling_window, center=True, min_periods=min_periods).std(ddof=0).to_numpy()
-
-    # Humidity rolling stats
-    hum_series = pd.Series(hum)
-    hum_mean = hum_series.rolling(rolling_window, center=True, min_periods=min_periods).mean().to_numpy()
-    hum_std = hum_series.rolling(rolling_window, center=True, min_periods=min_periods).std(ddof=0).to_numpy()
-
-    # Pressure rolling stats
-    press_series = pd.Series(pressure)
-    press_mean = press_series.rolling(rolling_window, center=True, min_periods=min_periods).mean().to_numpy()
-    press_std = press_series.rolling(rolling_window, center=True, min_periods=min_periods).std(ddof=0).to_numpy()
-
-    # True wind speed rolling stats
-    truew_series = pd.Series(truew)
-    truew_mean = truew_series.rolling(rolling_window, center=True, min_periods=min_periods).mean().to_numpy()
-    truew_std = truew_series.rolling(rolling_window, center=True, min_periods=min_periods).std(ddof=0).to_numpy()
-
-    ####################################################################################################################
-    ## Step 4: Process each data point in the chunk and write incrementally
-    ####################################################################################################################
-    row_buffer = []
-    with open(temp_filename, 'w', newline='') as temp_file:
-        writer = csv.writer(temp_file)
-
-        # Loop over data points, skipping edges
-        for k in range(window_radius, len(truew) - window_radius):
-            lhf, shf, m_o, tau = [], [], [], []
-
-            mean_tspd = truew_mean[k] # Mean true wind speed
-            std_tspd = truew_std[k] # Std dev of true wind speed
-
-            # Skip if mean_tspd is NaN or std_tspd is negative
-            if np.isnan(mean_tspd) or std_tspd < 0:
-                row = [
-                    time_list[k], ship_id[k], latitude[k], longitude[k],
-                    -9999, -9999, -9999, -9999,
-                    -9999, -9999, -9999,
-                    -9999, -9999, -9999, -9999, -9999
-                ]
-            else:  # Only compute fluxes if mean_tspd is valid
-                tspd_gauss = np.random.normal(mean_tspd, std_tspd, n)
-                press_gauss = np.random.normal(press_mean[k], press_std[k], n)
-                hum_gauss = np.random.normal(hum_mean[k], hum_std[k], n)
-                airT_gauss = np.random.normal(airT_mean[k], airT_std[k], n)
-                waterT_gauss = np.random.normal(waterT_mean[k], waterT_std[k], n)
-
-                for j in range(n):  # Loop over n Gaussian samples
-                    if is_valid_input(tspd_gauss[j], press_gauss[j], hum_gauss[j], airT_gauss[j], waterT_gauss[j]):
-                        try:
-                            flux = mft_fluxes(
-                                dyn_in_prm, tspd_gauss[j], dyn_in_val2, sfc_current1, sfc_current2,
-                                convect, press_gauss[j], air_moist_prm, hum_gauss[j], sfc_moist_prm,
-                                sfc_moist_val, salinity, ss_prm, ss_val, airT_gauss[j], sst_prm,
-                                waterT_gauss[j], ref_ht_wind, ref_ht_tq, z_wanted, astab, eqv_neut,
-                                net_heat_flux, warn, flux_model, z0_mom_prm, z0_theta_q_prm, stable_prm,
-                                oil_fract_area, dimensionless_m_o_length, zo_m, missing
-                            )
-                            m_o.append(flux[7]) # mean dmo
-                            lhf.append(flux[2]) # lhf
-                            shf.append(flux[1]) # shf
-                            tau.append(flux[3][0]) # tau
-                        except Exception as e:
-                            logger.error(f'Error in flux calculation at index {k}: {e}')
-                    else:
-                        logger.warning(f'Skipped iteration due to invalid inputs at index {k}')
-                        if j == 0:
-                            break
-
-            # Prepare output row
-            if len(shf) > 0:
-                row = [
-                    time_list[k], ship_id[k], latitude[k], longitude[k],
-                    np.std(shf), np.mean(shf),
-                    np.std(lhf), np.mean(lhf),
-                    np.std(tau), np.mean(tau),
-                    np.mean(m_o),
-                    airT_std[k], waterT_std[k],
-                    hum_std[k], press_std[k], truew_std[k]
-                ]
-            else:
-                row = [
-                    time_list[k], ship_id[k], latitude[k], longitude[k],
-                    -9999, -9999, -9999, -9999,
-                    -9999, -9999, -9999,
-                    -9999, -9999, -9999, -9999, -9999
-                ]
-            row_buffer.append(row)
-
-            # Write to temporary file every BATCH_SIZE rows
-            if len(row_buffer) >= BATCH_SIZE:
-                writer.writerows(row_buffer)
-                temp_file.flush()
-                os.fsync(temp_file.fileno())
-                row_buffer = []
-                logger.debug(f'Wrote {BATCH_SIZE} rows to temporary file {temp_filename} for chunk {chunk_idx+1}')
-
-        # Write any remaining rows in the buffer
-        if row_buffer:
-            writer.writerows(row_buffer)
-            temp_file.flush()
-            os.fsync(temp_file.fileno())
-            logger.debug(f'Wrote {len(row_buffer)} remaining rows to temporary file {temp_filename} for chunk {chunk_idx+1}')
-
-    # Final timing for chunk
-    chunk_end = time.time()
-    chunk_total = chunk_end - chunk_start
-    logger.info(f'Time to complete chunk {chunk_idx+1}: {chunk_total}')
-    return temp_filename  # Return the path to the temporary file
-
-####################################################################################################################
-## Step 5: Main function to process data and calculate fluxes using Dr. Bourassa's MFT calculations
-####################################################################################################################
-def process_data_prl():
+# ----------------------------------------------------------------------
+# MAIN PROCESSING FUNCTION
+# ----------------------------------------------------------------------
+def process_data():
     logger.info("Starting the data processing and flux calculation")
-    
+    logger.info(f"Only years listed in config.years will be processed: {years}")
+
     start_time = time.time()
     file_count = 0
 
-    # Ensure the base output directory exists
-    create_directory(output_csvs)
-
     for ship in ships:
         ship_start = time.time()
-        # Input directory for the ship
         directory_path = f'{input_csvs}/{ship}'
-        # Output directory for the ship
-        ship_output_dir = f'{output_csvs}/{ship}'
-        # Create ship-specific output directory
-        create_directory(ship_output_dir)
-       
-        # Loop over all files in the ship's input directory
+
+        if not os.path.isdir(directory_path):
+            logger.warning(f"Ship directory not found: {directory_path}")
+            continue
+
+        logger.info(f"Scanning directory for ship {ship}: {directory_path}")
+
+        # --------------------------------------------------------------
+        # Iterate over EVERY file in the ship folder
+        # --------------------------------------------------------------
         for filename in os.listdir(directory_path):
+            if not filename.lower().endswith('.csv'):
+                continue
+
+            # ----- Extract year from filename (e.g. KAOU2026.csv → 2026) -----
+            try:
+                file_year_str = filename.replace(ship, '').replace('.csv', '')
+                file_year = int(file_year_str)
+            except ValueError:
+                logger.warning(f"Cannot parse year from filename, skipping: {filename}")
+                continue
+
+            # ----- ONLY PROCESS YEARS THAT ARE IN config.years -----
+            if file_year not in years:
+                logger.info(f"Skipping {filename} (year {file_year} not in config.years)")
+                continue
+
             file_count += 1
             loop_start = time.time()
             file_path = os.path.join(directory_path, filename)
-            
-            # Load data, skipping first two rows
+
+            # ----- Load the raw CSV (skip the two metadata lines) -----
             try:
                 data = pd.read_csv(file_path, skiprows=[1, 2])
-                logger.info(f"Loaded file {file_path} with {len(data)} rows")
+                logger.info(f"Loaded {filename} – {len(data)} rows")
             except Exception as e:
                 logger.error(f"Failed to read {file_path}: {e}")
                 continue
 
-            # Define chunk parameters
+            # ------------------------------------------------------------------
+            # Chunking / overlapping window setup (unchanged)
+            # ------------------------------------------------------------------
             overlap = window_size // 2
             if chunk_size <= 2 * overlap:
-                logger.error(f"Invalid chunk_size ({chunk_size}) or overlap ({overlap}) for file {file_path}.")
+                logger.error(f"Invalid chunk_size ({chunk_size}) vs overlap ({overlap}) for {filename}")
                 continue
-            if chunk_size <= 0 or overlap < 0:
-                logger.error(f"Invalid chunk_size ({chunk_size}) or overlap ({overlap}) for file {file_path}.")
-                continue
-            
-            # Calculate number of chunks
+
             effective_chunk_size = chunk_size - 2 * overlap
-            number_of_chunks = max(1, (len(data) // effective_chunk_size) + (1 if len(data) % effective_chunk_size > 0 else 0))
-            logger.info(f"Processing file {file_path} with {number_of_chunks} chunks")
+            number_of_chunks = max(1,
+                                   (len(data) // effective_chunk_size) +
+                                   (1 if len(data) % effective_chunk_size else 0))
+            logger.info(f"Will process {filename} in {number_of_chunks} chunk(s)")
 
-            # Construct output filename: SHIP_ID[year]_processed.csv
-            output_filename = os.path.join(ship_output_dir, f"{filename[:-4]}_processed.csv")
-
-            # Check if final output file exists and is complete
-            if os.path.exists(output_filename):
-                try:
-                    output_data = pd.read_csv(output_filename)
-                    if len(output_data) >= len(data) - 2 * window_radius: # Account for edge effects
-                        logger.info(f"Skipping {output_filename} as it appears complete with {len(output_data)} rows")
-                        continue
-                except Exception as e: # If reading fails, proceed to reprocess
-                    logger.warning(f"Could not verify {output_filename}: {e}. Proceeding with processing.")
-
-            # Write header to CSV
-            with open(output_filename, "w", newline="") as file:
-                writer = csv.writer(file)
+            # Output CSV (one per input file)
+            csv_filename = f'{output_csvs}/{filename[:-4]}_processed.csv'
+            with open(csv_filename, "w", newline="") as f_out:
+                writer = csv.writer(f_out)
                 writer.writerow(headers)
 
-            # Define window_radius before chunk preparation
-            window_radius = 5  # Adjust window size as needed
+            chunk_count = 0
+            row_buffer = []                     # collect rows before bulk write
+            window_radius = 5                   # hard-coded from original code
 
-            # Prepare chunks for parallel processing
-            chunks = []
+            # ------------------------------------------------------------------
+            # CHUNK LOOP
+            # ------------------------------------------------------------------
             for start_idx in range(0, len(data), effective_chunk_size):
-                chunk_start_idx = max(0, start_idx - overlap)
-                chunk_end_idx = min(len(data), start_idx + chunk_size + overlap)
-                chunk = data.iloc[chunk_start_idx:chunk_end_idx].copy()
-                chunks.append((chunk, len(chunks), number_of_chunks, window_radius, headers, output_filename))
+                chunk_count += 1
+                chunk_start = time.time()
+                logger.debug(f'  → Chunk {chunk_count}/{number_of_chunks}')
 
-            # Process chunks in parallel using Pool
-            with Pool(processes=proc_num) as pool:
-                temp_files = pool.map(process_chunk, chunks)
+                # ----- Define chunk boundaries (with overlap) -----
+                end_idx = min(start_idx + chunk_size, len(data))
+                chunk = data.iloc[start_idx:end_idx]
 
-            # Combine temporary files into the final CSV in order
-            with open(output_filename, "a", newline="") as file:
-                writer = csv.writer(file)
-                # Sort by chunk index in the file name
-                for temp_file_path in sorted(temp_files, key=lambda x: int(x.split('_chunk')[-1].split('.csv')[0])):
-                    try:
-                        with open(temp_file_path, "r", newline="") as temp_file:
-                            reader = csv.reader(temp_file)
-                            writer.writerows(reader)
-                        file.flush()
-                        os.fsync(file.fileno())
-                        logger.debug(f'Appended temporary file {temp_file_path} to {output_filename}')
-                    except Exception as e:
-                        logger.error(f"Failed to append {temp_file_path}: {e}")
-                    finally:
-                        if os.path.exists(temp_file_path):
-                            os.unlink(temp_file_path)  # Delete temporary file after appending
+                # ----- Extract columns (once per chunk) -----
+                time_list   = chunk['time'].values
+                ship_id     = chunk['platform_call_sign'].values
+                latitude    = chunk['latitude'].values
+                longitude   = chunk['longitude'].values
+                truew       = chunk['in_SPD'].values
+                press       = chunk['in_P'].values
+                hum         = chunk['in_RH'].values
+                airT        = chunk['in_T'].values
+                waterT      = chunk['in_TS'].values
 
-            # Final timing for file
-            loop_end = time.time()
-            loop_total = loop_end - loop_start
-            logger.info(f'Time to complete file: {loop_total}')
+                # ----- Rolling-window means & stds (window = 11) -----
+                truew_mean = pd.Series(truew).rolling(window=window_size, center=True, min_periods=1).mean().values
+                truew_std  = pd.Series(truew).rolling(window=window_size, center=True, min_periods=1).std().fillna(0).values
+                press_mean = pd.Series(press).rolling(window=window_size, center=True, min_periods=1).mean().values
+                press_std  = pd.Series(press).rolling(window=window_size, center=True, min_periods=1).std().fillna(0).values
+                hum_mean   = pd.Series(hum).rolling(window=window_size, center=True, min_periods=1).mean().values
+                hum_std    = pd.Series(hum).rolling(window=window_size, center=True, min_periods=1).std().fillna(0).values
+                airT_mean  = pd.Series(airT).rolling(window=window_size, center=True, min_periods=1).mean().values
+                airT_std   = pd.Series(airT).rolling(window=window_size, center=True, min_periods=1).std().fillna(0).values
+                waterT_mean= pd.Series(waterT).rolling(window=window_size, center=True, min_periods=1).mean().values
+                waterT_std = pd.Series(waterT).rolling(window=window_size, center=True, min_periods=1).std().fillna(0).values
 
-        # Final timing for ship
-        ship_end = time.time()
-        ship_total = ship_end - ship_start
-        logger.info(f'Time to complete ship {ship}: {ship_total}')
-    
-    # Final timing for all processing
-    end_time = time.time()
-    elapsed_time = end_time - start_time
-    minutes, seconds = divmod(elapsed_time, 60)
-    logger.info(f"Data processing completed in {int(minutes)} min {seconds:.2f} sec")
+                # ----- Monte-Carlo loop over every row in the chunk -----
+                for k in range(len(chunk)):
+                    shf, lhf, tau, m_o = [], [], [], []
+
+                    # Generate n Gaussian realisations of the inputs
+                    tspd_gauss  = np.random.normal(truew_mean[k], truew_std[k], n)
+                    press_gauss = np.random.normal(press_mean[k], press_std[k], n)
+                    hum_gauss   = np.random.normal(hum_mean[k],   hum_std[k],   n)
+                    airT_gauss  = np.random.normal(airT_mean[k],  airT_std[k],  n)
+                    waterT_gauss= np.random.normal(waterT_mean[k],waterT_std[k],n)
+
+                    for j in range(n):
+                        if not is_valid_input(tspd_gauss[j], press_gauss[j],
+                                              hum_gauss[j], airT_gauss[j],
+                                              waterT_gauss[j]):
+                            continue
+
+                        try:
+                            flux = mft_fluxes(
+                                dyn_in_prm, tspd_gauss[j], dyn_in_val2,
+                                sfc_current1, sfc_current2,
+                                convect, press_gauss[j], air_moist_prm,
+                                hum_gauss[j], sfc_moist_prm, sfc_moist_val,
+                                salinity, ss_prm, ss_val,
+                                airT_gauss[j], sst_prm, waterT_gauss[j],
+                                ref_ht_wind, ref_ht_tq, z_wanted, astab,
+                                eqv_neut, net_heat_flux, warn, flux_model,
+                                z0_mom_prm, z0_theta_q_prm, stable_prm,
+                                oil_fract_area, dimensionless_m_o_length,
+                                zo_m, missing
+                            )
+                            # flux ordering (from original code): [?, shf, lhf, tau, ?, ?, ?, dmo, ...]
+                            m_o.append(flux[7])
+                            lhf.append(flux[2])
+                            shf.append(flux[1])
+                            tau.append(flux[3][0])
+                        except Exception as e:
+                            logger.debug(f'Flux error at row {k} iter {j}: {e}')
+
+                    # ----- Build output row -----
+                    if shf:   # at least one valid MC realisation
+                        row = [
+                            time_list[k], ship_id[k], latitude[k], longitude[k],
+                            np.std(shf), np.mean(shf),
+                            np.std(lhf), np.mean(lhf),
+                            np.std(tau), np.mean(tau),
+                            np.mean(m_o),
+                            airT_std[k], waterT_std[k],
+                            hum_std[k], press_std[k], truew_std[k]
+                        ]
+                    else:
+                        row = [time_list[k], ship_id[k], latitude[k], longitude[k],
+                               -9999, -9999, -9999, -9999,
+                               -9999, -9999, -9999,
+                               -9999, -9999, -9999, -9999, -9999]
+
+                    row_buffer.append(row)
+
+                # ----- Write the whole chunk at once -----
+                if row_buffer:
+                    with open(csv_filename, "a", newline="") as f_out:
+                        writer = csv.writer(f_out)
+                        writer.writerows(row_buffer)
+                    row_buffer.clear()
+
+                chunk_time = time.time() - chunk_start
+                logger.debug(f'Chunk {chunk_count} finished in {chunk_time:.2f}s')
+
+            # ----- End of file -----
+            file_time = time.time() - loop_start
+            logger.info(f'Finished {filename} in {file_time:.2f}s')
+
+        ship_time = time.time() - ship_start
+        logger.info(f'Ship {ship} total time: {ship_time:.2f}s')
+
+    total_time = time.time() - start_time
+    mins, secs = divmod(total_time, 60)
+    logger.info(f'=== ALL PROCESSING DONE in {int(mins)} min {secs:.2f} sec ===')
