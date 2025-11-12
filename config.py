@@ -9,13 +9,13 @@
 ships = ["KAOU"]
 
 # Define specific year(s) or create an empty array and loop over year range
-years = []
+years = [2026]
 
 # Set years to process
-for i in range(2005, 2026):
-    years.append(i)
+# for i in range(2005, 2026):
+#     years.append(i)
 
-proc_num = 80 # Number of parallel threads for processing  
+proc_num = 3 # Number of parallel threads for processing  
 
 # Define directory paths
 directory_destination = 'data/input/'

@@ -12,7 +12,7 @@ ref_ht_tq = 17.9                # Height given by SAMOS for air temp and humidit
 net_heat_flux = 5.0	            # Net heat flux (W/m^2)	
 sst_prm = 1                     # SST parameter)
 z0_mom_prm = 6		            # Momentum roughness parameter
-z0_theta_q_prm = 0              # Temperature and humidity roughness parameter
+z0_theta_q_prm = 2              # Temperature and humidity roughness parameter
 stable_prm = 0                  # Stability parameter				
 wave_ang = 0                    # Wave angle		
 dyn_in_prm = 0		            # Wind speed
@@ -32,7 +32,7 @@ dimensionless_m_o_length = 0.0  # Dimensionless momentum roughness length
 zo_m = 0.0                      # Momentum roughness length
 
 # Program specific constants
-n = 100                         # Select number of permutations to calculate
+n = 500                         # Select number of permutations to calculate
 chunk_size = 1000               # Chunk size for processing data in pieces
 window_size = 11                # Window size for rolling calculations
 flux_model = -1                 # Flux model selection (Blair 23, use 1 for S88)
