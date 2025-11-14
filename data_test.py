@@ -3,9 +3,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy import stats
 
+N = 100
+
 # --- load both runs ---
-r1 = pd.read_csv("data/output/KAOU/KAOU2026_processed_r1.csv")
-r2 = pd.read_csv("data/output/KAOU/KAOU2026_processed_r2.csv")
+r1 = pd.read_csv(f"data/output/KAOU/KAOU2026_processed_{N}_r1.csv")
+r2 = pd.read_csv(f"data/output/KAOU/KAOU2026_processed_{N}_r2.csv")
 
 # make sure timestamps align
 df = r1.merge(r2, on='time', suffixes=('_r1', '_r2'))
@@ -22,13 +24,12 @@ for var in ['hfss stdv', 'hfls stdv']:
     slope, intercept, r, p, se = stats.linregress(a, b)
     print(f'\n{var}')
     print(f'  mean run1: {mean_a:.2f}')
+    print(f'  mean run2: {np.nanmean(b):.2f}')
     print(f'  mean diff (r2 - r1): {mean_diff:.2f}')
     print(f'  correlation: {corr:.3f}')
     print(f'  slope: {slope:.3f}, intercept: {intercept:.3f}')
     print(f'  r^2: {r**2:.3f}')
 
-    # expected SE for N=100 MC samples
-    N = 100
     expected_se = (0.5*(a+b)) / np.sqrt(2*N)
     z = diff / expected_se
     frac_large = np.mean(np.abs(z) > 3)
@@ -46,7 +47,8 @@ for var in ['hfss stdv', 'hfls stdv']:
     plt.title(f'{var} comparison (N={N})')
     plt.legend()
     plt.grid(True)
-    plt.show()
+    plt.savefig(f'plots/{var.replace(" ","_")}_run_comparison_{N}.png', dpi=150)
+    # plt.show()
 
     # Bland–Altman
     m = 0.5*(a+b)
@@ -55,5 +57,6 @@ for var in ['hfss stdv', 'hfls stdv']:
     plt.axhline(0, color='k')
     plt.xlabel('Mean of runs')
     plt.ylabel('Run2 - Run1')
-    plt.title(f'Bland–Altman: {var}')
-    plt.show()
+    plt.title(f'Difference between runs against mean: {var}')
+    plt.savefig(f'plots/{var.replace(" ","_")}_diff_{N}.png', dpi=150)
+    # plt.show()
