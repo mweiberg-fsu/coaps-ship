@@ -5,12 +5,12 @@ import matplotlib.pyplot as plt
 from scipy import stats
 
 # === CONFIGURATION ===
-N = 500  # Window size used to compute stdv in processing
+N = 10  # Window size used to compute stdv in processing
 
 # --- Load flux runs ---
 print("Loading flux runs...")
-r1 = pd.read_csv("KAOU2025_flux_r1.csv")
-r2 = pd.read_csv("KAOU2025_flux_r2.csv")
+r1 = pd.read_csv("data/output/KAOU_r1/KAOU2018_r1.csv")
+r2 = pd.read_csv("data/output/KAOU_r2/KAOU2018_r2.csv")
 
 # Merge on timestamp
 df = r1.merge(r2, on='time', suffixes=('_r1', '_r2'))
@@ -26,7 +26,7 @@ print("\nLoading KAOU2025.csv ...")
 
 try:
     raw_df = pd.read_csv(
-        "KAOU2025.csv",
+        "data/input/KAOU/KAOU2025.csv",
         skiprows=[1],           # Skip units row (UTC, degrees_north, ...)
         engine="python",        # Handle malformed lines
         on_bad_lines="skip",    # Skip bad lines

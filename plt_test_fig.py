@@ -11,7 +11,7 @@ from matplotlib import cm
 # ------------------------------------------------------------------
 # 1. CONFIGURATION
 # ------------------------------------------------------------------
-CSV_FILE = "plots/hfls_stdv_outliers_FULL_N500.csv"   # Change if needed
+CSV_FILE = "plots/hfls_stdv_outliers_FULL_N10.csv"   # Change if needed
 OUT_DIR = "outlier_plots_enhanced"
 os.makedirs(OUT_DIR, exist_ok=True)
 
