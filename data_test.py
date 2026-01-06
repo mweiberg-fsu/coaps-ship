@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from scipy import stats
 
 # === CONFIGURATION ===
-N = 10  # Window size used to compute stdv in processing
+N = 10  # Window size used to compute stdv in processing test
 
 # --- Load flux runs ---
 print("Loading flux runs...")
