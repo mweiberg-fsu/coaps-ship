@@ -51,12 +51,53 @@ Sc = 1.00  # turbulent Schmidt number []
 thermalDiff = 2e-05  # or air from Gill p. 71 [m^2/s]
 molecularDiff = 2.4e-05  # for H2O in air from Gill p. 68 [m^2/s]
 
+# These limits prevent algorithm instability at low wind speeds with large air-sea temp differences
+MONIN_INV_LIMIT = 1.0  # Maximum magnitude of 1/L [m^-1] (limits free convection instability)
+MIN_WIND_FOR_BULK = 0.5  # Minimum wind speed [m/s] (results are flagged as uncertain below this)
+DELTA_T_THRESHOLD = 5.0  # Air-sea temp difference [°C] (low-wind results are uncertain above this)
+
 # Next value determines water type for solar absorption
 # 1 = Type I, 1.1 = Type IA,  1.2 = Type IB, 2.0 = Type II,
 # 3.0 = Type III, 0 = no solar absorption
 waterType = 1
 
 logger = logging.getLogger("MFT_log")
+
+
+def get_stability_quality_flag(wind_speed, delta_t, monin_inv):
+    """
+    Returns a quality flag indicating confidence in flux estimates.
+    
+    The bulk flux algorithm becomes unstable under free convection conditions
+    (low wind + large air-sea temperature difference). This function flags
+    such conditions.
+    
+    Returns:
+        0: Good quality - stable conditions
+        1: Marginal quality - approaching free convection limit
+        2: Poor quality - free convection regime, high uncertainty
+        3: Very poor quality - algorithm at/near singularity
+    
+    Args:
+        wind_speed: Wind speed magnitude [m/s]
+        delta_t: SST minus air temperature [°C] (positive = unstable)
+        monin_inv: Inverse Monin-Obukhov length [m^-1]
+    """
+    quality_flag = 0
+    
+    # Check for free convection regime (low wind + warm ocean)
+    if wind_speed < MIN_WIND_FOR_BULK and delta_t > DELTA_T_THRESHOLD:
+        quality_flag = 3  # Very poor - near singularity
+    elif wind_speed < 1.0 and delta_t > DELTA_T_THRESHOLD:
+        quality_flag = 2  # Poor - free convection dominant
+    elif wind_speed < 2.0 and delta_t > DELTA_T_THRESHOLD:
+        quality_flag = 1  # Marginal - transitional regime
+    
+    # Also flag based on extreme Monin-Obukhov values
+    if abs(monin_inv) > MONIN_INV_LIMIT:
+        quality_flag = max(quality_flag, 2)
+    
+    return quality_flag
 
 
 class MFTError(Exception):
@@ -716,6 +757,34 @@ def mft_fluxes(
     low_lim = 0.00001
     zero_speed_flag = FALSE
     dyn_in_mag = (dyn_in_val**2 + dyn_in_val2**2) ** 0.5
+    
+    # Add gustiness velocity for low-wind unstable conditions
+    # From COARE, this represents subgrid-scale convective motions 
+    # that maintain turbulent transfer even when mean wind is very low
+    delta_t_for_gust = t_skin - t_air
+    if dyn_in_mag < 2.0 and delta_t_for_gust > 0:  # Low wind, unstable (ocean warmer than air)
+        # Convective velocity scale: w* = (g/T * H_buoyancy * z_i)^(1/3)
+        # Simplified form using empirical coefficient (beta ~ 1.2 from COARE)
+        # Gustiness velocity ~ beta * w* where w* is convective velocity scale
+        # Here we use a simplified form compared to COARE: u_gust = beta * (delta_T)^(1/3) for small delta_T
+        beta_gust = 1.2  # gustiness parameter from COARE 3.0
+        zi_assumed = 600.0  # assumed boundary layer height [m]
+        if delta_t_for_gust > 0.1:
+            # Approximate convective velocity scale
+            w_star = (G * delta_t_for_gust / (t_air + 273.15) * zi_assumed) ** (1.0/3.0)
+            u_gustiness = beta_gust * w_star
+            # Effective wind includes gustiness
+            u_effective = m.sqrt(dyn_in_mag**2 + u_gustiness**2)
+            # Scale the input wind components to preserve direction but increase magnitude
+            if dyn_in_mag > low_lim:
+                scale_factor = u_effective / dyn_in_mag
+                dyn_in_val = dyn_in_val * scale_factor
+                dyn_in_val2 = dyn_in_val2 * scale_factor
+            else:
+                dyn_in_val = u_effective
+            dyn_in_mag = u_effective
+            logger.debug(f"Gustiness applied: w*={w_star:.2f}, u_gust={u_gustiness:.2f}, u_eff={u_effective:.2f}")
+    
     if dyn_in_mag <= low_lim:
         zero_speed_flag = TRUE
         dyn_in_val = low_lim
@@ -878,6 +947,14 @@ def mft_fluxes(
         q_at_z = missing
         modified_sst = missing
 
+    # Calculate stability quality flag for uncertainty estimation
+    delta_t = t_skin - t_air  # SST - air temp (positive = unstable)
+    stability_quality_flag = get_stability_quality_flag(dyn_in_mag, delta_t, monin_inv)
+    
+    if stability_quality_flag >= 2:
+        logger.warning(f"Low confidence flux estimate: quality_flag={stability_quality_flag}, "
+                      f"wind={dyn_in_mag:.2f} m/s, delta_T={delta_t:.2f} °C, 1/L={monin_inv:.4f}")
+
     return (
         bvw_flag,
         shf,
@@ -895,6 +972,7 @@ def mft_fluxes(
         t_at_z,
         q_at_z,
         modified_sst,
+        stability_quality_flag,  # NEW: quality flag for uncertainty estimation
     )
     # end of subroutine mft_fluxes
 
@@ -1160,6 +1238,14 @@ def solve(
                 if astab != 2:
                     if ustar2_mag != 0.0:
                         monin_inv = KV * bstar / ustar2_mag
+                        # Limit monin_inv to prevent instability in free convection regime
+                        # This is physically motivated: very large |1/L| indicates the 
+                        # Monin-Obukhov similarity theory is breaking down
+                        if monin_inv < -MONIN_INV_LIMIT:
+                            monin_inv = -MONIN_INV_LIMIT
+                            logger.debug(f"monin_inv limited to {-MONIN_INV_LIMIT} (free convection regime)")
+                        elif monin_inv > MONIN_INV_LIMIT:
+                            monin_inv = MONIN_INV_LIMIT
                     else:
                         monin_inv = 0.0
                 # end of iteration on tstar, qstar, and monin_inv
